@@ -1,12 +1,20 @@
 #pragma once
 
 #include "byte_stream.hh"
+#include <cstdint>
+#include <limits>
+#include <deque>
 
 class Reassembler
 {
 public:
   // Construct Reassembler to write into given ByteStream.
-  explicit Reassembler( ByteStream&& output ) : output_( std::move( output ) ) {}
+  explicit Reassembler( ByteStream&& output ) : output_( std::move( output ) ) { 
+    auto capacity = output_.writer().available_capacity();
+    _bytes_buffer.resize(capacity,0);
+    _bytes_flag.resize(capacity,false);
+    _capacity = capacity;
+  }
 
   /*
    * Insert a new substring to be reassembled into a ByteStream.
@@ -42,4 +50,10 @@ public:
 
 private:
   ByteStream output_; // the Reassembler writes to this ByteStream
+  uint64_t _first_pending_idx{0};
+  uint64_t _unassembled_bytes{0};
+  uint64_t _capacity{0};
+  uint64_t _eof_idx{std::numeric_limits<uint64_t>::max()};
+  std::deque<char> _bytes_buffer = {};
+  std::deque<bool> _bytes_flag = {};
 };
