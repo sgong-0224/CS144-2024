@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <queue>
+#include <unordered_map>
 
 #include "address.hh"
 #include "ethernet_frame.hh"
@@ -81,4 +83,15 @@ private:
 
   // Datagrams that have been received
   std::queue<InternetDatagram> datagrams_received_ {};
+
+  typedef struct
+  {
+    EthernetAddress addr;
+    uint16_t ttl;
+  } ARP_info;
+  std::unordered_map<uint32_t, ARP_info> arp_table_ {};
+  const uint16_t init_ttl_ = 30000;
+  std::unordered_map<uint32_t, uint16_t> pending_arp_res_ {};
+  const uint16_t res_ttl_ = 5000;
+  std::deque<std::pair<Address, InternetDatagram>> pending_ip_datagrams_ {};
 };
