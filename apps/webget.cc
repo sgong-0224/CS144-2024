@@ -13,7 +13,7 @@ void get_URL( const string& host, const string& path )
 {
   // cerr << "Function called: get_URL(" << host << ", " << path << ")\n";
   Address address( host, "http" );
-  TCPSocket socket;
+  CS144TCPSocket socket;
   socket.connect( address );
   std::string message;
   message += "GET " + path + " HTTP/1.1\r\n";
