@@ -42,5 +42,5 @@ private:
     std::optional<Address> next_hop;
     uint8_t prefix_length;
   }route_info;
-  std::vector<route_info> route_table_;
+  std::vector<route_info> route_table_{};
 };

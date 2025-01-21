@@ -30,7 +30,7 @@ void TCPSender::push( const TransmitFunction& transmit )
     }
     auto remaining_wnd = ( window_size_ == 0 ? 1 : window_size_ ) - bytes_in_flight_;
     auto max_len = std::min( input_.reader().bytes_buffered(), TCPConfig::MAX_PAYLOAD_SIZE );
-    auto payload_len = std::min( max_len, remaining_wnd );
+    auto payload_len = std::min( max_len, remaining_wnd-msg.sequence_length() );    
     read( input_.reader(), payload_len, msg.payload );
     if ( !FIN_ && input_.reader().is_finished() && remaining_wnd > msg.sequence_length() ) {
       FIN_ = true;
@@ -73,10 +73,10 @@ void TCPSender::receive( const TCPReceiverMessage& msg )
         break;
       ack_ += m.sequence_length();
       bytes_in_flight_ = abs_seqno_ - ack_;
-      msg_in_flight_.pop();
       consecutive_retrans_cnt_ = 0;
       cur_RTO_ms_ = initial_RTO_ms_;
       timer_ = 0;
+      msg_in_flight_.pop();
       if ( msg_in_flight_.empty() )
         timer_en_ = false;
     }
