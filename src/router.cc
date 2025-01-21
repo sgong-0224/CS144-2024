@@ -25,10 +25,10 @@ void Router::add_route( const uint32_t route_prefix,
     if(entry.route_prefix==route_prefix && entry.prefix_length==prefix_length){
         entry.next_hop = next_hop;
         entry.interface_num = interface_num;
-        break;
+        return;
     }
   }
-  route_table_.push_back({route_prefix,interface_num,next_hop,prefix_length});
+  route_table_.push_back(route_info{route_prefix,interface_num,next_hop,prefix_length});
 }
 
 // Go through all the interfaces, and route every incoming datagram to its proper outgoing interface.
@@ -50,13 +50,14 @@ void Router::route()
         continue;
       }
       dgram.header.ttl -= 1;
+      dgram.header.compute_checksum();
       auto dst_ip = dgram.header.dst;
       int match_length = -1;
       uint32_t next_hop = 0;
       size_t interface_num = 0;
       for ( auto const& entry : route_table_ ) {
         if ( match( dst_ip, entry.route_prefix, entry.prefix_length ) 
-        && entry.prefix_length > match_length ) {
+        && entry.prefix_length >= match_length ) {
           match_length = entry.prefix_length;
           interface_num = entry.interface_num;
           next_hop = entry.next_hop.has_value()? entry.next_hop.value().ipv4_numeric() : dst_ip;

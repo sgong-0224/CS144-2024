@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iterator>
 
 #include "arp_message.hh"
 #include "exception.hh"
@@ -31,24 +32,24 @@ void NetworkInterface::send_datagram( const InternetDatagram& dgram, const Addre
   auto next_hop_ip = next_hop.ipv4_numeric();
   auto arp_iter = arp_table_.find( next_hop_ip );
   if ( arp_iter == arp_table_.end() ) {
+    pending_ip_datagrams_.push_back( { next_hop, dgram } );
     if ( pending_arp_res_.find( next_hop_ip ) == pending_arp_res_.end() ) {
       ARPMessage arp_msg = { .opcode = ARPMessage::OPCODE_REQUEST,
                              .sender_ethernet_address = ethernet_address_,
                              .sender_ip_address = ip_address_.ipv4_numeric(),
                              .target_ethernet_address = {},
                              .target_ip_address = next_hop_ip };
-      EthernetFrame frame;
-      frame.header = { ETHERNET_BROADCAST, ethernet_address_, EthernetHeader::TYPE_ARP };
-      frame.payload = serialize( arp_msg );
-      transmit( frame );
-      pending_arp_res_[next_hop_ip] = res_ttl_;
+      transmit(EthernetFrame{
+        .header = { ETHERNET_BROADCAST, ethernet_address_, EthernetHeader::TYPE_ARP },
+        .payload  = serialize( move(arp_msg) )
+      });
+      pending_arp_res_[next_hop_ip] = 0;
     }
-    pending_ip_datagrams_.push_back( { next_hop, dgram } );
   } else {
-    EthernetFrame frame;
-    frame.header = { arp_iter->second.addr, ethernet_address_, EthernetHeader::TYPE_IPv4 };
-    frame.payload = serialize( dgram );
-    transmit( frame );
+    transmit(EthernetFrame{
+        .header = { arp_iter->second.addr, ethernet_address_, EthernetHeader::TYPE_IPv4 },
+        .payload  = serialize( move(dgram) )
+    });
   }
 }
 
@@ -63,7 +64,7 @@ void NetworkInterface::recv_frame( const EthernetFrame& frame )
       IPv4Datagram dgram;
       if ( !parse( dgram, frame.payload ) )
         return;
-      datagrams_received_.push( std::move( dgram ) );
+      datagrams_received_.push( move( dgram ) );
       break;
     }
     case EthernetHeader::TYPE_ARP: {
@@ -71,25 +72,32 @@ void NetworkInterface::recv_frame( const EthernetFrame& frame )
       if ( !parse( arp_msg, frame.payload ) )
         return;
       if ( arp_msg.opcode == ARPMessage::OPCODE_REQUEST
-           && arp_msg.target_ip_address == ip_address_.ipv4_numeric() ) {
+        && arp_msg.target_ip_address == ip_address_.ipv4_numeric() ) {
         transmit( EthernetFrame {
-          .header = { arp_msg.sender_ethernet_address, ethernet_address_, EthernetHeader::TYPE_ARP },
-          .payload = serialize( ARPMessage {
+            .header = { arp_msg.sender_ethernet_address, ethernet_address_, EthernetHeader::TYPE_ARP },
+            .payload = serialize( ARPMessage {
             .opcode = ARPMessage::OPCODE_REPLY,
             .sender_ethernet_address = ethernet_address_,
             .sender_ip_address = ip_address_.ipv4_numeric(),
             .target_ethernet_address = arp_msg.sender_ethernet_address,
             .target_ip_address = arp_msg.sender_ip_address,
-          } ) } );
-      }
-      auto src = arp_msg.sender_ethernet_address;
-      auto src_ip = arp_msg.sender_ip_address;
-      arp_table_[arp_msg.sender_ip_address] = { src, init_ttl_ };
-      for ( auto iter = pending_ip_datagrams_.begin(); iter != pending_ip_datagrams_.end(); ) {
-        if ( iter->first.ipv4_numeric() == src_ip ) {
-          transmit( EthernetFrame { .header = { src, ethernet_address_, EthernetHeader::TYPE_IPv4 },
-                                    .payload = serialize( iter->second ) } );
-          iter = pending_ip_datagrams_.erase( iter );
+            } ) } );
+        auto src = arp_msg.sender_ethernet_address;
+        arp_table_[arp_msg.sender_ip_address] = { src, 0 };
+      } else if ( arp_msg.opcode == ARPMessage::OPCODE_REPLY ){
+        auto src = arp_msg.sender_ethernet_address;
+        arp_table_[arp_msg.sender_ip_address] = { src, 0 };
+        for ( auto iter = pending_ip_datagrams_.begin(); iter != pending_ip_datagrams_.end(); ) {
+            if ( iter->first == Address::from_ipv4_numeric(arp_msg.sender_ip_address) ) {
+                transmit( EthernetFrame { 
+                    .header = { arp_msg.sender_ethernet_address, ethernet_address_, 
+                        EthernetHeader::TYPE_IPv4  },
+                    .payload = serialize( iter->second ) 
+                } );
+                iter = pending_ip_datagrams_.erase( iter );
+            }else{
+                ++iter;
+            }
         }
       }
     }
@@ -100,22 +108,15 @@ void NetworkInterface::recv_frame( const EthernetFrame& frame )
 void NetworkInterface::tick( const size_t ms_since_last_tick )
 {
   for ( auto it = arp_table_.begin(); it != arp_table_.end(); ) {
-    if ( it->second.ttl <= ms_since_last_tick ) {
+    if ( (it->second.ttl += ms_since_last_tick) > init_ttl_ )
       it = arp_table_.erase( it );
-    } else {
-      it->second.ttl -= ms_since_last_tick;
-      it = std::next( it );
-    }
+    else
+      ++it;
   }
   for ( auto it = pending_arp_res_.begin(); it != pending_arp_res_.end(); ) {
-    if ( it->second <= ms_since_last_tick ) {
-      for ( auto iter = pending_ip_datagrams_.begin(); iter != pending_ip_datagrams_.end(); )
-        if ( it->first == iter->first.ipv4_numeric() )
-          iter = pending_ip_datagrams_.erase( iter );
+    if ( (it->second += ms_since_last_tick) > res_ttl_ ) {
       it = pending_arp_res_.erase( it );
-    } else {
-      it->second -= ms_since_last_tick;
-      it = std::next( it );
-    }
+    } else
+      ++it;
   }
 }
